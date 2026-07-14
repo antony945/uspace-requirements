@@ -69,6 +69,8 @@
     border: 1px solid var(--border); background: var(--panel); color: var(--text);
   }
   .btn:hover { border-color: var(--accent); }
+  .copy-btn { padding: 2px 7px; font-size: 12px; line-height: 1; white-space: nowrap; }
+  .copy-btn.copied { border-color: var(--accent); color: var(--accent); }
   .group-title {
     font-size: 14px; margin: 22px 0 10px; padding-bottom: 6px;
     border-bottom: 1px solid var(--border); color: var(--accent);
@@ -106,6 +108,7 @@
   mark.hl { background: rgba(250, 204, 21, .35); color: inherit; border-radius: 3px; padding: 0 1px; }
   .field { margin-top: 12px; }
   .field .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 3px; }
+  .field .label.label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .quote { font-size: 13.5px; background: var(--quoteBg); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); }
   .quote .qp, .note .qp { margin: 0 0 8px; }
   .quote .qp:last-child, .note .qp:last-child { margin-bottom: 0; }
@@ -10323,7 +10326,44 @@
       perf + svc + unreviewed;
   }
 
+  function reqPayload(item) {
+    return item.document + " \u2014 " + item.reference + "\n\n" + item.quote;
+  }
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    } else {
+      fallbackCopy(text);
+    }
+  }
+  function wireCopyButtons(root) {
+    root.querySelectorAll(".copy-btn").forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();
+        e.preventDefault();
+        const item = byKey[btn.dataset.copyKey];
+        if (!item) return;
+        const text = btn.dataset.copyKind === "note" ? (item.note || "") : reqPayload(item);
+        copyToClipboard(text);
+        const prev = btn.textContent;
+        btn.textContent = "\u2713";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove("copied"); }, 1500);
+      };
+    });
+  }
+
   function bodyFieldsHtml(item) {
+    const key = item.document + " | " + item.reference;
     const applies = item.applies_to && item.applies_to.length
       ? '<div class="field"><div class="label">Applies to</div><div class="reflinks appliesto">' +
         item.applies_to.map(r => '<a href="#" data-ref="' + escapeHtml(r) + '">' + escapeHtml(r) + '</a>').join("") +
@@ -10335,7 +10375,7 @@
         '</div></div>'
       : "";
     return '<div class="field"><div class="label">Quote</div><div class="quote">' + formatQuote(item.quote) + '</div></div>' +
-      (item.note ? '<div class="field"><div class="label">Note</div><div class="note">' + formatQuote(item.note) + '</div></div>' : "") +
+      (item.note ? '<div class="field"><div class="label label-row">Note<button class="btn copy-btn" data-copy-key="' + escapeHtml(key) + '" data-copy-kind="note" title="Copy note">📝</button></div><div class="note">' + formatQuote(item.note) + '</div></div>' : "") +
       applies +
       reflinks;
   }
@@ -10351,15 +10391,18 @@
       '      <div class="ref">' + highlight(escapeHtml(item.document)) + ' - ' + highlight(escapeHtml(item.reference)) + '</div>' +
       '      <div class="badges">' + badgesHtml(item) + '</div>' +
       '    </div>' +
+      '    <button class="btn copy-btn" data-copy-key="' + escapeHtml(key) + '" data-copy-kind="req" title="Copy requirement">📋</button>' +
       '  </div>' +
       '  <div class="body">' + bodyFieldsHtml(item) + '</div>' +
       '</div>';
   }
 
   function detailHtml(item) {
+    const key = item.document + " | " + item.reference;
     return '<div class="detail-head">' +
       '<div class="ref">' + highlight(escapeHtml(item.document)) + ' - ' + highlight(escapeHtml(item.reference)) + '</div>' +
       '<div class="badges">' + badgesHtml(item) + '</div>' +
+      '<button class="btn copy-btn" data-copy-key="' + escapeHtml(key) + '" data-copy-kind="req" title="Copy requirement">📋</button>' +
       '</div>' + bodyFieldsHtml(item);
   }
 
@@ -10395,6 +10438,7 @@
     resultsEl.querySelectorAll(".reflinks a").forEach(a => {
       a.onclick = e => { e.preventDefault(); openRef(a.dataset.ref); };
     });
+    wireCopyButtons(resultsEl);
   }
 
   // ---- Reference preview modal (drill-down stack) ----
@@ -10410,6 +10454,7 @@
       : '<div class="modal-notfound">Referenced requirement <b>' + escapeHtml(key) + '</b> not found in dataset.</div>';
     modalEl.classList.toggle("show-back", refStack.length > 1);
     modalContentEl.scrollTop = 0;
+    wireCopyButtons(modalContentEl);
   }
   function openRef(key) {
     if (!key) return;
